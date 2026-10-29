@@ -355,16 +355,21 @@ function updateLaunchView(svg,m,shot,progress,cup){
  const cameraBall=trackedBall&&progress>=1?{...trackedBall,x:trackedBall.x+(shot.distance/100-trackedBall.x)*settleBlend,y:trackedBall.y*(1-settleBlend)}:trackedBall;
  const headX=O.x+PHYSICS.armLength*620*Math.cos(m.angle*Math.PI/180),left=Math.min(65,headX-25);
  const rigTop=O.y-PHYSICS.armLength*620-35;
- const travelled=cameraBall?Math.max(0,cameraBall.x)*S:0;
- const right=Math.max(left+baseWidth,cameraBall?releaseX+cameraBall.x*S+60:left+baseWidth);
- const visiblePeak=active&&flying?Math.max(...shot.path.filter(pt=>pt.t<=flightTime).map(pt=>pt.y),cameraBall?.y??0):0;
- const top=Math.min(rigTop,active&&flying?floor-visiblePeak*S-45:rigTop);
+ // Finish camera pullback before the descent ends. Following x with the view width
+ // indefinitely pins the ball to the right edge and makes a real parabola appear vertical.
+ const rigBoundsTop=rigTop;
+ const flightFraction=active&&flying?Math.min(1,flightTime/Math.max(1e-9,shot.t)):0;
+ const overviewBall=active?reboundPose(shot,.05):null;
+ const endRight=active?Math.max(releaseX+shot.distance/100*S,releaseX+overviewBall.x*S)+75:left+baseWidth;
+ const peak=active?(shot.cameraPeak??(shot.cameraPeak=Math.max(...shot.path.map(pt=>pt.y)))):0;
+ const endTop=Math.min(rigBoundsTop,active?floor-peak*S-50:rigBoundsTop);
+ const overviewWidth=Math.max(baseWidth,endRight-left,(O.y-endTop)/anchorY*aspect);
+ const zoomFraction=Math.min(1,flightFraction/.70),zoomEase=zoomFraction*(2-zoomFraction);
  const showMovingBall=active&&flying&&(progress<1||motionPlaying||Number.isFinite(currentBounceTime));
  const showingFlight=showMovingBall||active&&flying&&progress>=1&&impactReadoutShot===shot;
- // hypot grows gently at launch, without revealing the full future range in advance.
- const width=showingFlight?Math.max(Math.hypot(baseWidth,travelled),right-left,(O.y-top)/anchorY*aspect):baseWidth,height=width/aspect;
+ const width=showingFlight?baseWidth+(overviewWidth-baseWidth)*zoomEase:baseWidth,height=width/aspect;
  const blend=1-baseWidth/width;
- svg.dataset.cameraPhase=!active?'initial':!flying?'arm':progress<1?'progressive-flight':'landing-overview';
+ svg.dataset.cameraPhase=!active?'initial':!flying?'arm':progress<1?(zoomFraction>=1?'steady-descent':'progressive-flight'):'landing-overview';
  const view={x:left,y:O.y-anchorY*height,width,height};
  svg.setAttribute('viewBox',`${view.x} ${view.y} ${view.width} ${view.height}`);svg.dataset.cameraBlend=blend;svg.dataset.rigScale=String(baseWidth/width);
  svg.classList.toggle('flight-wide',blend>.12);svg.classList.toggle('structure-xray',$('xrayStructure').checked);
@@ -400,7 +405,7 @@ function updateLaunchView(svg,m,shot,progress,cup){
  const hudPhase=!active?'准备发射':progress>=1?'首次落地':flying?'小球飞行':'回转加速';
  $('hudLaunchPhase').textContent=hudPhase;
  if(active){const current=flying?samplePath(shot.path,Math.min(shot.t,flightTime)):null;$('hudLaunchValues').textContent=flying?progress>=1?'点击机身仅重新上弦':format(current.x*100,1)+' cm · '+format(Math.hypot(current.vx,current.vy),2)+' m/s':'当前臂角 '+format(m.angle,1)+'° → '+v[1]+'°';}else $('hudLaunchValues').textContent='拖动黄臂上弦 · 松手发射';
- $('mainViewStatus').textContent=active?(progress>=1?'落点全貌 · 镜头固定，80% 球影保留首次落点':'等比例渐进取景 · 随小球飞行逐渐拉远'):blend>.12?(progress>=1?'首次落地 · 卷尺色带为目标 ±15 cm；红色指针为落点':'完整弹道与投射器同屏 · 公共轴上下位置固定'):($('xrayStructure').checked?'结构透视 · 共轴支点与绳路':'机构近景 · 黄色部件可拖动');
+ $('mainViewStatus').textContent=active?(progress>=1?'落点全貌 · 镜头固定，80% 球影保留首次落点':'等比例渐进取景 · 下降后段固定镜头，保留向前飞行弧线'):blend>.12?(progress>=1?'首次落地 · 卷尺色带为目标 ±15 cm；红色指针为落点':'完整弹道与投射器同屏 · 公共轴上下位置固定'):($('xrayStructure').checked?'结构透视 · 共轴支点与绳路':'机构近景 · 黄色部件可拖动');
 }
 
 function diagramCoords(event){const point=$('mechanism').createSVGPoint();point.x=event.clientX;point.y=event.clientY;return point.matrixTransform($('mechanism').getScreenCTM().inverse())}
