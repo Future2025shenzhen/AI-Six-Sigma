@@ -334,21 +334,22 @@ function updateLaunchView(svg,m,shot,progress,cup){
  const follows=active;
  const target=(active?shot.targetSnapshot?.value:targets[activeTarget]),targetName=active?shot.targetSnapshot?.name??targetNames[activeTarget]:targetNames[activeTarget];
  const releaseX=O.x+ballMountPose(v,v[1]).x*620,furthest=Math.max((Number.isFinite(target)?target:0)+15,active?reboundPose(shot,.35).x*100:0);
- // Fit the complete shot with one physical scale; keep the common pivot at
- // the same vertical screen fraction while zooming, never pan vertically.
- const aspect=Math.max(.5,svg.clientWidth/Math.max(1,svg.clientHeight)),baseHeight=430,baseWidth=baseHeight*aspect,anchorY=.78;
- const cameraBall=active&&flying?(progress>=1&&Number.isFinite(currentBounceTime)?reboundPose(shot,currentBounceTime):samplePath(shot.path,Math.min(shot.t,flightTime))):null;
+ // Orthographic camera: start at 75% of the previous near-view size and zoom out progressively.
+ // Only the first flight determines framing. Rebound motion cannot move or enlarge the camera.
+ const aspect=Math.max(.5,svg.clientWidth/Math.max(1,svg.clientHeight)),baseHeight=430/.75,baseWidth=baseHeight*aspect,anchorY=.78;
+ const cameraBall=active&&flying?samplePath(shot.path,Math.min(shot.t,flightTime)):null;
  const headX=O.x+PHYSICS.armLength*620*Math.cos(m.angle*Math.PI/180),left=Math.min(65,headX-25);
  const rigTop=O.y-PHYSICS.armLength*620-35;
- const flightExtent=active?Math.max(shot.distance/100,cameraBall?.x??0):0;
- const right=Math.max(left+baseWidth,active?releaseX+flightExtent*S+55:left+baseWidth,active&&flying&&progress>=1&&retainedX!==null?retainedX+55:left+baseWidth);
- const flightPeak=active?Math.max(...shot.path.map(pt=>pt.y),...shot.reboundPath.map(pt=>pt.y)):0;
- const top=Math.min(rigTop,active?floor-flightPeak*S-45:rigTop);
- const fullWidth=Math.max(baseWidth,right-left,(O.y-top)/anchorY*aspect);
+ const travelled=cameraBall?Math.max(0,cameraBall.x)*S:0;
+ const right=Math.max(left+baseWidth,cameraBall?releaseX+cameraBall.x*S+60:left+baseWidth);
+ const visiblePeak=active&&flying?Math.max(...shot.path.filter(pt=>pt.t<=flightTime).map(pt=>pt.y),cameraBall?.y??0):0;
+ const top=Math.min(rigTop,active&&flying?floor-visiblePeak*S-45:rigTop);
  const showMovingBall=active&&flying&&(progress<1||motionPlaying||Number.isFinite(currentBounceTime));
  const showingFlight=showMovingBall||active&&flying&&progress>=1&&impactReadoutShot===shot;
- const armZoom=active&&!flying?Math.max(0,Math.min(1,(m.time/Math.max(.001,shot.armTime)-.5)*2)):0;
- const blend=showingFlight?1:armZoom*armZoom*(3-2*armZoom),width=baseWidth+(fullWidth-baseWidth)*blend,height=width/aspect;
+ // hypot grows gently at launch, without revealing the full future range in advance.
+ const width=showingFlight?Math.max(Math.hypot(baseWidth,travelled),right-left,(O.y-top)/anchorY*aspect):baseWidth,height=width/aspect;
+ const blend=1-baseWidth/width;
+ svg.dataset.cameraPhase=!active?'initial':!flying?'arm':progress<1?'progressive-flight':'landing-overview';
  const view={x:left,y:O.y-anchorY*height,width,height};
  svg.setAttribute('viewBox',`${view.x} ${view.y} ${view.width} ${view.height}`);svg.dataset.cameraBlend=blend;svg.dataset.rigScale=String(baseWidth/width);
  svg.classList.toggle('flight-wide',blend>.12);svg.classList.toggle('structure-xray',$('xrayStructure').checked);
@@ -374,7 +375,7 @@ function updateLaunchView(svg,m,shot,progress,cup){
  if(flying){
   const ball=progress>=1&&Number.isFinite(currentBounceTime)?reboundPose(shot,currentBounceTime):samplePath(shot.path,Math.min(shot.t,flightTime)),points=shot.path.filter(pt=>pt.t<flightTime);points.push(ball);
   const x=releaseX+ball.x*S,y=floor-ball.y*S;
-  set('world-ball',{cx:x,cy:y,visibility:showMovingBall?'visible':'hidden',opacity:1});set('world-trajectory',{d:points.map((pt,i)=>`${i?'L':'M'} ${releaseX+pt.x*S} ${floor-pt.y*S}`).join(' ')});
+  set('world-ball',{cx:x,cy:y,visibility:showMovingBall&&x>=view.x&&x<=view.x+view.width&&y>=view.y&&y<=view.y+view.height?'visible':'hidden',opacity:1});set('world-trajectory',{d:points.map((pt,i)=>`${i?'L':'M'} ${releaseX+pt.x*S} ${floor-pt.y*S}`).join(' ')});
   const landingX=releaseX+shot.distance/100*S;set('tape-impact-pointer',{d:`M ${landingX} ${floor+9} V ${floor+54}`});
   const hit=isHit(shot.distance,target),color=hit?'#227c58':'#b85a40';
   set('world-impact',{cx:releaseX+shot.distance/100*S,cy:floor,rx:12*zoom,ry:4*zoom,stroke:color,'stroke-width':2*zoom});
@@ -384,7 +385,7 @@ function updateLaunchView(svg,m,shot,progress,cup){
  const hudPhase=!active?'准备发射':progress>=1?'首次落地':flying?'小球飞行':'回转加速';
  $('hudLaunchPhase').textContent=hudPhase;
  if(active){const current=flying?samplePath(shot.path,Math.min(shot.t,flightTime)):null;$('hudLaunchValues').textContent=flying?progress>=1?'点击机身仅重新上弦':format(current.x*100,1)+' cm · '+format(Math.hypot(current.vx,current.vy),2)+' m/s':'当前臂角 '+format(m.angle,1)+'° → '+v[1]+'°';}else $('hudLaunchValues').textContent='拖动黄臂上弦 · 松手发射';
- $('mainViewStatus').textContent=active?'等比例慢镜头 · 首次落点保留 80% 球影，下方卷尺 80% 球影局部放大':blend>.12?(progress>=1?'首次落地 · 卷尺色带为目标 ±15 cm；红色指针为落点':'完整弹道与投射器同屏 · 公共轴上下位置固定'):($('xrayStructure').checked?'结构透视 · 共轴支点与绳路':'机构近景 · 黄色部件可拖动');
+ $('mainViewStatus').textContent=active?(progress>=1?'落点全貌 · 镜头固定，80% 球影保留首次落点':'等比例渐进取景 · 随小球飞行逐渐拉远'):blend>.12?(progress>=1?'首次落地 · 卷尺色带为目标 ±15 cm；红色指针为落点':'完整弹道与投射器同屏 · 公共轴上下位置固定'):($('xrayStructure').checked?'结构透视 · 共轴支点与绳路':'机构近景 · 黄色部件可拖动');
 }
 
 function diagramCoords(event){const point=$('mechanism').createSVGPoint();point.x=event.clientX;point.y=event.clientY;return point.matrixTransform($('mechanism').getScreenCTM().inverse())}
@@ -493,7 +494,7 @@ document.addEventListener('pointerdown',event=>{const e=event.target.closest('in
 document.addEventListener('pointerup',()=>{if(activeFactorUI){activeFactorUI=null;drawMechanism()}},true);
 document.addEventListener('pointercancel',()=>{activeFactorUI=null;drawMechanism()},true);
 
-$('recockArm').onclick=()=>{if(busy||auto||verificationRunning)return;reviewing=false;updateFactor(factors[0],factors[1].value);draw(1,null);$('sceneStatus').textContent='已复位：释放角与开火角一致，请向左拉臂后松手发射'};
+$('recockArm').onclick=()=>{if(busy||auto||verificationRunning)return;reviewing=false;updateFactor(factors[0],factors[1].value);draw(1,null);$('sceneStatus').textContent='已恢复初始视野，小球已回到球杯；向后拉臂后松手发射'};
 document.addEventListener('keydown',event=>{if(event.code!=='Space'||event.repeat||event.target.closest('input,select,textarea,button,[role="slider"]')||!$('lab').checkVisibility())return;event.preventDefault();if(!busy&&!auto&&!verificationRunning)$(event.target.closest('[data-recock-body]')?'recockArm':'launch').click()});
 
 updateImpactReadout();
